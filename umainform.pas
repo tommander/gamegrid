@@ -184,7 +184,10 @@ begin
     begin
       if not Assigned(layerToMove) then
       begin
-        layerToMove := (Layer as TGameLayer);
+        if Layer is TGameLayer then
+        begin
+          layerToMove := (Layer as TGameLayer);
+        end;
       end
       else
       begin

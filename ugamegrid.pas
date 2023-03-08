@@ -920,6 +920,11 @@ begin
   try
     BitmapList.Bitmaps.Clear;
 
+    if not DirectoryExists(AppDir(FDirLayers)) then
+    begin
+      Exit;
+    end;
+
     {$IFDEF Unix}
     if FindFirst(AppDir(JoinPath([FDirLayers,'*.png'])), 0, sr) <> -1 then
     {$ELSE Unix}
@@ -953,6 +958,11 @@ begin
   sl := TStringList.Create;
   try
     ATV.Items.Clear;
+
+    if not DirectoryExists(AppDir(FDirObjects)) then
+    begin
+      Exit;
+    end;
 
     {$IFDEF Unix}
     if FindFirst(AppDir(JoinPath([FDirObjects,'*.obj'])), 0, sr) <> -1 then
