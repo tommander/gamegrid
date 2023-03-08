@@ -5,37 +5,37 @@ unit ugamecommon;
 interface
 
 uses
-  Classes, SysUtils;
+  Classes, SysUtils, RegExpr;
 
 type
   TMapDir = (mdLeft,mdBottom,mdRight,mdTop);
   TMapPos = object
-    X: QWord;
-    Y: QWord;
-    Valid: boolean;
+    X: Int64;
+    Y: Int64;
 
-    function Make(AX,AY: QWord; AValid: boolean = true): TMapPos; static;
-    procedure Create(AX,AY: QWord; AValid: boolean = true);
-    procedure FromPoint(APoint: TPoint; AValid: boolean = true);
+    function Make(AX,AY: Int64): TMapPos; static;
+    procedure Create(AX,AY: Int64);
+    procedure FromPoint(APoint: TPoint);
     function ToPoint(): TPoint;
     function ToStr(): string;
+    procedure FromStr(AValue: string);
   end;
   TMapSize = object
     Width: QWord;
     Height: QWord;
-    Valid: boolean;
 
-    function Make(AWidth,AHeight: QWord; AValid: boolean = true): TMapSize; static;
-    procedure Create(AWidth,AHeight: QWord; AValid: boolean = true);
-    procedure FromPoint(APoint: TPoint; AValid: boolean = true);
+    function Make(AWidth,AHeight: QWord): TMapSize; static;
+    procedure Create(AWidth,AHeight: QWord);
+    procedure FromPoint(APoint: TPoint);
     function ToPoint(): TPoint;
     function ToStr(): string;
+    procedure FromStr(AValue: string);
   end;
   TMapRect = object
-    Left: QWord;
-    Right: QWord;
-    Top: QWord;
-    Bottom: QWord;
+    Left: Int64;
+    Right: Int64;
+    Top: Int64;
+    Bottom: Int64;
     private
       procedure SetWidth(AWidth: QWord);
       function GetWidth(): QWord;
@@ -46,18 +46,19 @@ type
       property Height: QWord read GetHeight write SetHeight;
 
       function Make(): TMapRect; static;
-      function Make(ALeft,ATop,ARight,ABottom: QWord): TMapRect; static;
+      function Make(ALeft,ATop,ARight,ABottom: Int64): TMapRect; static;
       function Make(ALeftTop: TMapPos; AWidth,AHeight: QWord): TMapRect; static;
       function Make(ALeftTop: TMapPos; ASize: TMapSize): TMapRect;
       procedure Create();
-      procedure Create(ALeft,ATop,ARight,ABottom: QWord);
+      procedure Create(ALeft,ATop,ARight,ABottom: Int64);
       procedure Create(ALeftTop: TMapPos; AWidth,AHeight: QWord);
       procedure Create(ALeftTop: TMapPos; ASize: TMapSize);
       procedure FromRect(ARect: TRect);
       function ToRect(): TRect;
       function ToStr(): string;
+      procedure FromStr(AValue: string);
       function Contains(APos: TMapPos): boolean;
-      function Contains(ARect: TMapRect; var FDebug: string): boolean;
+      function Contains(ARect: TMapRect): boolean;
       function Overflow(ARect: TMapRect): boolean;
   end;
 
@@ -65,11 +66,37 @@ operator =(a,b: TMapPos): boolean;
 operator =(a,b: TMapSize): boolean;
 operator =(a,b: TMapRect): boolean;
 
+function AppDir(AFile: string = ''): string;
+function JoinPath(const AElems: array of string): string;
 function MapDirToStr(ADir: TMapDir): string;
 
 implementation
 
 { Global }
+
+function AppDir(AFile: string = ''): string;
+begin
+  result := ExtractFilePath(ParamStr(0));
+  if AFile <> '' then
+  begin
+    result := IncludeTrailingPathDelimiter(result)+AFile;
+  end;
+end;
+
+function JoinPath(const AElems: array of string): string;
+var i: integer;
+begin
+  result := '';
+  if Length(AElems) = 0 then
+  begin
+    Exit;
+  end;
+  result := AElems[Low(AElems)];
+  for i := Low(AElems)+1 to High(AElems) do
+  begin
+    result := result + DirectorySeparator + AElems[i];
+  end;
+end;
 
 function MapDirToStr(ADir: TMapDir): string;
 begin
@@ -92,37 +119,46 @@ begin
   );
 end;
 
-function TMapPos.Make(AX,AY: QWord; AValid: boolean = true): TMapPos; static;
+function TMapPos.Make(AX,AY: Int64): TMapPos; static;
 begin
-  result.Create(AX,AY,AValid);
+  result.Create(AX,AY);
 end;
 
-procedure TMapPos.Create(AX,AY: QWord; AValid: boolean = true);
+procedure TMapPos.Create(AX,AY: Int64);
 begin
   X := AX;
   Y := AY;
-  Valid := AValid;
 end;
 
-procedure TMapPos.FromPoint(APoint: TPoint; AValid: boolean = true);
+procedure TMapPos.FromPoint(APoint: TPoint);
 begin
   X := APoint.X;
   Y := APoint.Y;
-  Valid := AValid;
 end;
 
 function TMapPos.ToPoint(): TPoint;
 begin
-  if not Valid then
-  begin
-    raise Exception.Create('Trying to convert invalid TMapPos to TPoint');
-  end;
   result.Create(X,Y);
 end;
 
 function TMapPos.ToStr(): string;
 begin
-  result := '['+UIntToStr(X)+';'+UIntToStr(Y)+';'+BoolToStr(Valid,'valid','invalid')+']';
+  result := '['+IntToStr(X)+';'+IntToStr(Y)+']';
+end;
+
+procedure TMapPos.FromStr(AValue: string);
+var re: TRegExpr;
+begin
+  re := TRegExpr.Create('\[(\d+);(\d+)\]');
+  try
+    if re.Exec(AValue) then
+    begin
+      X := StrToInt64Def(re.Match[1], 0);
+      Y := StrToInt64Def(re.Match[2], 0);
+    end;
+  finally
+    re.Free;
+  end;
 end;
 
 { TMapSize }
@@ -135,37 +171,46 @@ begin
   );
 end;
 
-function TMapSize.Make(AWidth,AHeight: QWord; AValid: boolean = true): TMapSize;
+function TMapSize.Make(AWidth,AHeight: QWord): TMapSize;
 begin
-  result.Create(AWidth, AHeight, AValid);
+  result.Create(AWidth, AHeight);
 end;
 
-procedure TMapSize.Create(AWidth,AHeight: QWord; AValid: boolean = true);
+procedure TMapSize.Create(AWidth,AHeight: QWord);
 begin
   Width := AWidth;
   Height := AHeight;
-  Valid := AValid;
 end;
 
-procedure TMapSize.FromPoint(APoint: TPoint; AValid: boolean = true);
+procedure TMapSize.FromPoint(APoint: TPoint);
 begin
   Width := APoint.X;
   Height := APoint.Y;
-  Valid := AValid;
 end;
 
 function TMapSize.ToPoint(): TPoint;
 begin
-  if not Valid then
-  begin
-    raise Exception.Create('Trying to convert invalid TMapSize to TPoint');
-  end;
   result.Create(Width, Height);
 end;
 
 function TMapSize.ToStr(): string;
 begin
-  result := '['+UIntToStr(Width)+';'+UIntToStr(Height)+';'+BoolToStr(Valid,'valid','invalid')+']';
+  result := '['+UIntToStr(Width)+';'+UIntToStr(Height)+']';
+end;
+
+procedure TMapSize.FromStr(AValue: string);
+var re: TRegExpr;
+begin
+  re := TRegExpr.Create('\[(\d+);(\d+)\]');
+  try
+    if re.Exec(AValue) then
+    begin
+      Width := StrToUInt64Def(re.Match[1], 0);
+      Height := StrToUInt64Def(re.Match[2], 0);
+    end;
+  finally
+    re.Free;
+  end;
 end;
 
 { TMapRect }
@@ -182,32 +227,20 @@ end;
 
 procedure TMapRect.SetWidth(AWidth: QWord);
 begin
-  if AWidth = 0 then
-  begin
-    Right := Left;
-    Exit;
-  end;
   Right := Left+AWidth-1;
-//Left := Right-AWidth+1;
 end;
 
 function TMapRect.GetWidth(): QWord;
 begin
   if Right < Left then
   begin
-    result := 0;
-    Exit;
+    Exit(0);
   end;
   result := Right-Left+1;
 end;
 
 procedure TMapRect.SetHeight(AHeight: QWord);
 begin
-  if AHeight = 0 then
-  begin
-    Bottom := Top;
-    Exit;
-  end;
   Bottom := Top+AHeight-1;
 end;
 
@@ -215,8 +248,7 @@ function TMapRect.GetHeight(): QWord;
 begin
   if Bottom < Top then
   begin
-    result := 0;
-    Exit;
+    Exit(0);
   end;
   result := Bottom-Top+1;
 end;
@@ -226,7 +258,7 @@ begin
   result.Create();
 end;
 
-function TMapRect.Make(ALeft,ATop,ARight,ABottom: QWord): TMapRect;
+function TMapRect.Make(ALeft,ATop,ARight,ABottom: Int64): TMapRect;
 begin
   result.Create(ALeft,ATop,ARight,ABottom);
 end;
@@ -246,7 +278,7 @@ begin
   Create(0,0,0,0);
 end;
 
-procedure TMapRect.Create(ALeft,ATop,ARight,ABottom: QWord);
+procedure TMapRect.Create(ALeft,ATop,ARight,ABottom: Int64);
 begin
   Left := ALeft;
   Top := ATop;
@@ -282,7 +314,24 @@ end;
 
 function TMapRect.ToStr(): string;
 begin
-  result := '['+UIntToStr(Left)+';'+UIntToStr(Top)+';'+UIntToStr(Right)+';'+UIntToStr(Bottom)+']';
+  result := '['+IntToStr(Left)+';'+IntToStr(Top)+';'+IntToStr(Right)+';'+IntToStr(Bottom)+']';
+end;
+
+procedure TMapRect.FromStr(AValue: string);
+var re: TRegExpr;
+begin
+  re := TRegExpr.Create('\[(\d+);(\d+);(\d+);(\d+)\]');
+  try
+    if re.Exec(AValue) then
+    begin
+      Left := StrToInt64Def(re.Match[1], 0);
+      Top := StrToInt64Def(re.Match[2], 0);
+      Right := StrToInt64Def(re.Match[3], 0);
+      Bottom := StrToInt64Def(re.Match[4], 0);
+    end;
+  finally
+    re.Free;
+  end;
 end;
 
 function TMapRect.Contains(APos: TMapPos): boolean;
@@ -290,10 +339,9 @@ begin
   result := (APos.X >= Left) and (APos.X <= Right) and (APos.Y >= Top) and (APos.Y <= Bottom);
 end;
 
-function TMapRect.Contains(ARect: TMapRect; var FDebug: string): boolean;
+function TMapRect.Contains(ARect: TMapRect): boolean;
 begin
-  result := (not ((ARect.Left > Right) or (ARect.Right < Left) or (ARect.Top > Bottom) or (ARect.Bottom < Top)));
-  FDebug := Format('[%d;%d;%d;%d]^[%d;%d;%d;%d] => %s', [Left, Top, Right, Bottom, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom, BoolToStr(result, 'Contains', 'No contains')]);
+  result := (not ((ARect.Left > Right) or (ARect.Right < Left) or (ARect.Top > Bottom) or (ARect.Bottom < Top)));;
 end;
 
 function TMapRect.Overflow(ARect: TMapRect): boolean;

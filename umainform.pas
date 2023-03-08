@@ -6,42 +6,50 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, ExtCtrls, StdCtrls,
-  ComCtrls, Spin, ugamegrid, GR32_Image, GR32_Layers, ugamecommon;
+  ComCtrls, Spin, Buttons, ugamegrid, GR32, GR32_Image, GR32_Layers,
+  ugamecommon, Types;
 
 type
 
   { TForm1 }
 
   TForm1 = class(TForm)
-    Bitmap32List1: TBitmap32List;
     Button1: TButton;
     Button2: TButton;
     Button3: TButton;
-    Image32_1: TImage32;
-    ImageList1: TImageList;
     Label1: TLabel;
+    Label2: TLabel;
     Memo1: TMemo;
     Memo2: TMemo;
     Panel1: TPanel;
     Panel2: TPanel;
+    Panel3: TPanel;
+    Panel4: TPanel;
+    RadioGroup1: TRadioGroup;
     ScrollBar1: TScrollBar;
     ScrollBar2: TScrollBar;
     SpinEdit1: TSpinEdit;
     SpinEdit2: TSpinEdit;
-    SpinEdit5: TSpinEdit;
-    SpinEdit6: TSpinEdit;
+    SpinEdit3: TSpinEdit;
+    SpinEdit4: TSpinEdit;
     Splitter1: TSplitter;
     Splitter2: TSplitter;
     tmrRepaint: TTimer;
+    TreeView1: TTreeView;
     procedure Button1Click(Sender: TObject);
     procedure Button2Click(Sender: TObject);
     procedure Button3Click(Sender: TObject);
+    procedure FormActivate(Sender: TObject);
     procedure FormCreate(Sender: TObject);
-    procedure Image32_1MouseLeave(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
     procedure Image32_1MouseMove(Sender: TObject; Shift: TShiftState; X,
       Y: Integer; Layer: TCustomLayer);
     procedure Image32_1MouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer; Layer: TCustomLayer);
+    procedure Image32_1MouseWheelDown(Sender: TObject; Shift: TShiftState;
+      MousePos: TPoint; var Handled: Boolean);
+    procedure Image32_1MouseWheelUp(Sender: TObject; Shift: TShiftState;
+      MousePos: TPoint; var Handled: Boolean);
     procedure Image32_1Resize(Sender: TObject);
     procedure ScrollBar1Scroll(Sender: TObject; ScrollCode: TScrollCode;
       var ScrollPos: Integer);
@@ -51,8 +59,12 @@ type
     procedure GGChangeMapSize(Sender: TObject);
     procedure GGChangeViewport(Sender: TObject);
     procedure GGLog(Sender: TObject);
+    procedure GGAfterLayerPaint(ALayer: TCustomLayer);
+    procedure TreeView1Deletion(Sender: TObject; Node: TTreeNode);
   private
     var gg: TGameGrid;
+    var firstActivate: boolean;
+    var layerToMove: TGameLayer;
   public
 
   end;
@@ -68,18 +80,36 @@ implementation
 
 procedure TForm1.FormCreate(Sender: TObject);
 begin
-//  PaintBox32_1.;
-  gg := TGameGrid.Create(Image32_1,Bitmap32List1);
+  layerToMove := nil;
+  firstActivate := true;
+
+  gg := TGameGrid.Create(self);
+  gg.Parent := Panel4;
+  gg.Align := alClient;
+  gg.BitmapAlign := baTopLeft;
+  gg.RepaintMode := rmOptimizer;
+  gg.ScaleMode := smNormal;
+
   gg.OnChangeMapSize := @GGChangeMapSize;
   gg.OnChangeViewport := @GGChangeViewport;
   gg.OnLog := @GGLog;
-  gg.MapSize := TMapSize.Make(3,2);
-  gg.Viewport := TMapRect.Make(TMapPos.Make(0,0),3,2);
+  gg.OnAfterLayerPaint := @GGAfterLayerPaint;
+
+  gg.OnMouseMove := @Image32_1MouseMove;
+  gg.OnMouseUp := @Image32_1MouseUp;
+  gg.OnMouseWheelDown := @Image32_1MouseWheelDown;
+  gg.OnMouseWheelUp := @Image32_1MouseWheelUp;
+  gg.OnResize := @Image32_1Resize;
+
+  gg.DirLayers := 'data/layers';
+  gg.DirObjects := 'data/objects';
+
+  gg.LoadGraphics();
+  gg.LoadObjects(TreeView1);
 end;
 
-procedure TForm1.Image32_1MouseLeave(Sender: TObject);
+procedure TForm1.FormDestroy(Sender: TObject);
 begin
-  gg.FieldCursor.Create(0,0,false);
 end;
 
 procedure TForm1.Image32_1MouseMove(Sender: TObject; Shift: TShiftState; X,
@@ -99,6 +129,7 @@ end;
 
 procedure TForm1.Image32_1MouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer; Layer: TCustomLayer);
+//const arrObj: array[0..3] of string = ('wire','input','output','gate');
 
   procedure SetLayerInfo(TheLayer: TCustomLayer);
   var gn: TGameNeighbours;
@@ -114,7 +145,7 @@ procedure TForm1.Image32_1MouseUp(Sender: TObject; Button: TMouseButton;
     if TheLayer is TGameLayer then
     begin
       Memo2.Lines.Add('Game Layer');
-      Memo2.Lines.Add('Pos: %s', [(TheLayer as TGameLayer).Pos.ToStr()]);
+//      Memo2.Lines.Add('Pos: %s', [(TheLayer as TGameLayer).Pos.ToStr()]);
       Memo2.Lines.Add('Size: %s', [(TheLayer as TGameLayer).Size.ToStr()]);
       Memo2.Lines.Add('Rect: %s', [(TheLayer as TGameLayer).Rect.ToStr()]);
       Memo2.Lines.Add('Data: %p', [(TheLayer as TGameLayer).Data]);
@@ -141,33 +172,96 @@ procedure TForm1.Image32_1MouseUp(Sender: TObject; Button: TMouseButton;
     end
     else
     begin
-      gg.FieldSelected.Create(0,0,false);
+      gg.FieldSelected := gg.FieldFromXY(X,Y);
     end;
   end;
 
 begin
   UpdateFieldSelected();
 
-  if (Button = mbLeft) then
-  begin
-    SetLayerInfo(Layer);
-    Exit;
-  end;
-  if (Button = mbMiddle) then
-  begin
-    if gg.AddObject(Random(Bitmap32List1.Bitmaps.Count), gg.FieldFromXY(X,Y), TMapSize.Make(1,1), nil) = -1 then
+  case RadioGroup1.ItemIndex of
+    1: //Move
     begin
-      showmessage('Cannot');
+      if not Assigned(layerToMove) then
+      begin
+        layerToMove := (Layer as TGameLayer);
+      end
+      else
+      begin
+        gg.MoveObject(layerToMove, gg.FieldFromXY(X,Y));
+        layerToMove := nil;
+      end;
     end;
-    Exit;
-  end;
-  if (Button = mbRight) then
-  begin
-    if gg.AddObject(Random(Bitmap32List1.Bitmaps.Count), gg.FieldFromXY(X,Y), TMapSize.Make(2,1), nil) = -1 then
+    2: //Rotate
     begin
-      showmessage('Cannot');
+      layerToMove := nil;
+      if Layer is TGameLayer then
+      begin
+        gg.RotateObject(Layer as TGameLayer);
+      end;
     end;
-    Exit;
+    3: //Delete
+    begin
+      layerToMove := nil;
+      if Layer is TGameLayer then
+      begin
+        gg.RemoveObject(Layer as TGameLayer);
+      end;
+    end;
+    4: //Add
+    begin
+      layerToMove := nil;
+      if Assigned(TreeView1.Selected) and Assigned(TreeView1.Selected.Data) then
+      begin
+        if gg.AddObject(gg.FieldFromXY(X,Y), TGameTreeNodeData(TreeView1.Selected.Data).FContent) = -1 then
+        begin
+          showmessage('Cannot');
+        end;
+      end;
+    end;
+    else //Select
+    begin
+      layerToMove := nil;
+      SetLayerInfo(Layer);
+    end;
+  end;
+end;
+
+procedure TForm1.Image32_1MouseWheelDown(Sender: TObject; Shift: TShiftState;
+  MousePos: TPoint; var Handled: Boolean);
+begin
+  if Shift = [ssCtrl] then
+  begin
+    gg.Zoom(false);
+  end
+  else if Shift = [ssShift] then
+  begin
+    gg.ScrollH(1);
+    ScrollBar1.Position := ScrollBar1.Position + 1;
+  end
+  else if Shift = [] then
+  begin
+    gg.ScrollV(1);
+    ScrollBar2.Position := ScrollBar2.Position + 1;
+  end;
+end;
+
+procedure TForm1.Image32_1MouseWheelUp(Sender: TObject; Shift: TShiftState;
+  MousePos: TPoint; var Handled: Boolean);
+begin
+  if Shift = [ssCtrl] then
+  begin
+    gg.Zoom(true);
+  end
+  else if Shift = [ssShift] then
+  begin
+    gg.ScrollH(-1);
+    ScrollBar1.Position := ScrollBar1.Position - 1;
+  end
+  else if Shift = [] then
+  begin
+    gg.ScrollV(-1);
+    ScrollBar2.Position := ScrollBar2.Position - 1;
   end;
 end;
 
@@ -179,20 +273,14 @@ end;
 
 procedure TForm1.ScrollBar1Scroll(Sender: TObject; ScrollCode: TScrollCode;
   var ScrollPos: Integer);
-//var vw: QWord;
 begin
-//  vw := gg.Viewport.Width;
-  gg.Viewport := TMapRect.Make(TMapPos.Make(ScrollPos, gg.Viewport.Top), gg.Viewport.Width, gg.Viewport.Height);
-//  gg.Viewport.Width := vw;
+  gg.ScrollH(ScrollPos-ScrollBar1.Position);
 end;
 
 procedure TForm1.ScrollBar2Scroll(Sender: TObject; ScrollCode: TScrollCode;
   var ScrollPos: Integer);
-//var vh: QWord;
 begin
-//  vh := gg.Viewport.Height;
-  gg.Viewport := TMapRect.Make(TMapPos.Make(gg.Viewport.Left, ScrollPos), gg.Viewport.Width, gg.Viewport.Height);
-//  gg.Viewport.Height := vh;
+  gg.ScrollV(ScrollPos-ScrollBar2.Position);
 end;
 
 procedure TForm1.tmrRepaintTimer(Sender: TObject);
@@ -203,7 +291,7 @@ end;
 
 procedure TForm1.Button1Click(Sender: TObject);
 begin
-  Image32_1.Invalidate;
+  gg.Invalidate;
 end;
 
 procedure TForm1.Button2Click(Sender: TObject);
@@ -212,8 +300,23 @@ begin
 end;
 
 procedure TForm1.Button3Click(Sender: TObject);
+var vp: TMapRect;
 begin
-  gg.Viewport := TMapRect.Make(TMapPos.Make(gg.Viewport.Left, gg.Viewport.Top), SpinEdit5.Value, SpinEdit6.Value);
+  vp := gg.Viewport;
+  vp.Width := SpinEdit3.Value;
+  vp.Height := SpinEdit4.Value;
+  gg.Viewport := vp;
+end;
+
+procedure TForm1.FormActivate(Sender: TObject);
+begin
+  if not firstActivate then
+  begin
+    Exit;
+  end;
+  firstActivate := false;
+  gg.MapSize := TMapSize.Make(3,2);
+  gg.Viewport := TMapRect.Make(TMapPos.Make(0,0),3,2);
 end;
 
 procedure TForm1.GGChangeMapSize(Sender: TObject);
@@ -224,8 +327,8 @@ end;
 
 procedure TForm1.GGChangeViewport(Sender: TObject);
 begin
-  SpinEdit5.Value := gg.Viewport.Width;
-  SpinEdit6.Value := gg.Viewport.Height;
+  SpinEdit3.Value := gg.Viewport.Width;
+  SpinEdit4.Value := gg.Viewport.Height;
   ScrollBar1.Max := gg.MapSize.Width-gg.Viewport.Width;
   ScrollBar2.Max := gg.MapSize.Height-gg.Viewport.Height;
 end;
@@ -233,6 +336,84 @@ end;
 procedure TForm1.GGLog(Sender: TObject);
 begin
   Memo1.Lines.Text := gg.Log;
+end;
+
+procedure TForm1.GGAfterLayerPaint(ALayer: TCustomLayer);
+
+  function RelativeRect(ARect: TFloatRect): TRect;
+  begin
+    result.Left := Round(ARect.Left - (ALayer as TGameLayer).Location.Left);
+    result.Right := Round(ARect.Right - (ALayer as TGameLayer).Location.Left);
+    result.Top := Round(ARect.Top - (ALayer as TGameLayer).Location.Top);
+    result.Bottom := Round(ARect.Bottom - (ALayer as TGameLayer).Location.Top);
+  end;
+
+var b: TBitmap32;
+    i: integer;
+    rct: TRect;
+begin
+  if not (ALayer is TGameLayer) then
+  begin
+    Exit;
+  end;
+
+  (ALayer as TGameLayer).Bitmap.BeginUpdate;
+  try
+      // Left pins
+      b := gg.GetBitmap('pinL');
+      for i := (ALayer as TGameLayer).Rect.Top to (ALayer as TGameLayer).Rect.Bottom do
+      begin
+        rct := RelativeRect(gg.FieldBoundsFloat(
+          TMapPos.Make((ALayer as TGameLayer).Rect.Left, i),
+          TMapSize.Make(1,1)
+        ));
+        b.DrawTo((ALayer as TGameLayer).Bitmap, rct);
+      end;
+
+      // Bottom pins
+      b := gg.GetBitmap('pinB');
+      for i := (ALayer as TGameLayer).Rect.Left to (ALayer as TGameLayer).Rect.Right do
+      begin
+        rct := RelativeRect(gg.FieldBoundsFloat(
+          TMapPos.Make(i, (ALayer as TGameLayer).Rect.Bottom),
+          TMapSize.Make(1,1)
+        ));
+        b.DrawTo((ALayer as TGameLayer).Bitmap, rct);
+      end;
+
+      // Right pins
+      b := gg.GetBitmap('pinR');
+      for i := (ALayer as TGameLayer).Rect.Bottom downto (ALayer as TGameLayer).Rect.Top do
+      begin
+        rct := RelativeRect(gg.FieldBoundsFloat(
+          TMapPos.Make((ALayer as TGameLayer).Rect.Right, i),
+          TMapSize.Make(1,1)
+        ));
+        b.DrawTo((ALayer as TGameLayer).Bitmap, rct);
+      end;
+
+      // Top pins
+      b := gg.GetBitmap('pinT');
+      for i := (ALayer as TGameLayer).Rect.Right downto (ALayer as TGameLayer).Rect.Left do
+      begin
+        rct := RelativeRect(gg.FieldBoundsFloat(
+          TMapPos.Make(i, (ALayer as TGameLayer).Rect.Top),
+          TMapSize.Make(1,1)
+        ));
+        b.DrawTo((ALayer as TGameLayer).Bitmap, rct);
+      end;
+  finally
+    (ALayer as TGameLayer).Bitmap.EndUpdate;
+  end;
+end;
+
+procedure TForm1.TreeView1Deletion(Sender: TObject; Node: TTreeNode);
+begin
+  if Assigned(Node.Data) then
+  begin
+    TGameTreeNodeData(Node.Data).Free;
+    Node.Data := nil;
+  end;
 end;
 
 end.
